@@ -1,10 +1,12 @@
+import io
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import streamlit as st
 from PIL import Image
+import requests
 
 # TensorFlow 依賴：若缺少會在 UI 顯示清楚錯誤
 try:
@@ -25,10 +27,29 @@ CATEGORY_ZH = ["土八哥", "白尾八哥", "家八哥"]
 DEFAULT_MODEL_PATH = "myna_resnet50v2.h5"
 IMAGE_SIZE = (224, 224)
 
+# 內建範例（含八哥與非八哥）
+SAMPLE_IMAGES = {
+    "八哥-白尾": "https://upload.wikimedia.org/wikipedia/commons/6/6b/Javan_Myna_Singapore.jpg",
+    "八哥-家八哥": "https://upload.wikimedia.org/wikipedia/commons/7/7d/Common_Myna_%28Acridotheres_tristis%29_Photograph_by_Shantanu_Kuveskar.jpg",
+    "八哥-土八哥": "https://upload.wikimedia.org/wikipedia/commons/1/16/Crested_Myna_2018-03-03.jpg",
+    "非八哥-藍鵲": "https://upload.wikimedia.org/wikipedia/commons/4/40/Taiwan_Blue_Magpie.jpg",
+    "非八哥-麻雀": "https://upload.wikimedia.org/wikipedia/commons/0/0c/Tree_sparrow_3.jpg",
+}
 
-def load_image(image_file: Path) -> Image.Image:
-    """讀入影像並轉成 RGB。"""
-    img = Image.open(image_file)
+
+def load_image(image_file: Union[Path, str, io.BytesIO]) -> Image.Image:
+    """讀入影像並轉成 RGB，支援本地路徑、URL、記憶體緩衝。"""
+    if isinstance(image_file, (str, Path)):
+        s = str(image_file)
+        if s.startswith("http://") or s.startswith("https://"):
+            resp = requests.get(s, timeout=10)
+            resp.raise_for_status()
+            buf = io.BytesIO(resp.content)
+            img = Image.open(buf)
+        else:
+            img = Image.open(s)
+    else:
+        img = Image.open(image_file)
     if img.mode != "RGB":
         img = img.convert("RGB")
     return img
@@ -88,11 +109,10 @@ def main():
     uploaded = st.sidebar.file_uploader("上傳圖片", type=["jpg", "jpeg", "png", "bmp", "webp"])
 
     sample_images = discover_sample_images(Path("."), CATEGORY_EN)
-    sample_choice: Optional[str] = None
+    sample_options = ["(不使用範例)"] + list(SAMPLE_IMAGES.keys())
     if sample_images:
-        sample_choice = st.sidebar.selectbox(
-            "或選擇範例圖片", options=["(不使用範例)"] + [str(p) for p in sample_images]
-        )
+        sample_options += [f"(本地){p}" for p in sample_images]
+    sample_choice: Optional[str] = st.sidebar.selectbox("快速範例", options=sample_options)
 
     # 主體區
     col1, col2 = st.columns([1, 1])
@@ -108,8 +128,15 @@ def main():
             st.error(f"讀取上傳圖片失敗：{e}")
     elif sample_choice and sample_choice != "(不使用範例)":
         try:
-            image = load_image(Path(sample_choice))
-            image_name = Path(sample_choice).name
+            if sample_choice in SAMPLE_IMAGES:
+                image = load_image(SAMPLE_IMAGES[sample_choice])
+                image_name = sample_choice
+            elif sample_choice.startswith("(本地)"):
+                p = Path(sample_choice.replace("(本地)", "", 1))
+                image = load_image(p)
+                image_name = p.name
+            else:
+                image = None
         except Exception as e:
             st.error(f"讀取範例圖片失敗：{e}")
 
@@ -158,7 +185,7 @@ def main():
 
     # 範例圖片提示
     if not sample_images:
-        st.caption("未找到範例圖片資料夾，請自行上傳圖片進行辨識。")
+        st.caption("未找到本地範例資料夾，已提供線上範例（含八哥與非八哥）。")
 
 
 if __name__ == "__main__":
