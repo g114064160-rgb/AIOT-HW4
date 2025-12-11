@@ -27,13 +27,13 @@ CATEGORY_ZH = ["土八哥", "白尾八哥", "家八哥"]
 DEFAULT_MODEL_PATH = "myna_resnet50v2.h5"
 IMAGE_SIZE = (224, 224)
 
-# 內建範例（含八哥與非八哥）
+# 內建範例（含八哥與非八哥），使用本地檔避免外部連線問題
 SAMPLE_IMAGES = {
-    "八哥-白尾": "https://upload.wikimedia.org/wikipedia/commons/6/6b/Javan_Myna_Singapore.jpg",
-    "八哥-家八哥": "https://upload.wikimedia.org/wikipedia/commons/7/7d/Common_Myna_%28Acridotheres_tristis%29_Photograph_by_Shantanu_Kuveskar.jpg",
-    "八哥-土八哥": "https://upload.wikimedia.org/wikipedia/commons/1/16/Crested_Myna_2018-03-03.jpg",
-    "非八哥-藍鵲": "https://upload.wikimedia.org/wikipedia/commons/4/40/Taiwan_Blue_Magpie.jpg",
-    "非八哥-麻雀": "https://upload.wikimedia.org/wikipedia/commons/0/0c/Tree_sparrow_3.jpg",
+    "八哥-白尾": "assets/samples/javan_myna.jpg",
+    "八哥-家八哥": "assets/samples/common_myna.jpg",
+    "八哥-土八哥": "assets/samples/crested_myna.jpg",
+    "非八哥-鳥1": "assets/samples/non_myna_bird1.jpg",
+    "非八哥-鳥2": "assets/samples/non_myna_bird2.jpg",
 }
 
 
