@@ -2,6 +2,9 @@
 
 使用「【Demo02】遷移式學習做八哥辨識器.ipynb」延伸的完整說明，協助你快速換資料、重新訓練並上線。
 
+## Streamlit
+- https://aiot-hw4-ai9kq6knrsnc9nk24cgarr.streamlit.app/
+
 ## 功能特色
 - 遷移學習：`ResNet50V2(include_top=False, pooling="avg")`，最後接 `Dense(num_classes, softmax)`。
 - 預設三類八哥：`crested_myna`(土八哥)、`javan_myna`(白尾八哥)、`common_myna`(家八哥)；可自行增減。
