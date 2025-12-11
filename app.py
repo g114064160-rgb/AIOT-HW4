@@ -9,22 +9,18 @@ from PIL import Image
 import requests
 
 # TensorFlow 依賴：若缺少會在 UI 顯示清楚錯誤
+TF_AVAILABLE = False
 try:
-    from tensorflow.keras.applications.resnet_v2 import preprocess_input
-    from tensorflow.keras.models import load_model
-except ModuleNotFoundError as e:
-    st.error(
-        "TensorFlow 未安裝或版本不符，請先安裝 `tensorflow` 或 `tensorflow-cpu`。"
-        " 若在 Streamlit Cloud，請確認 requirements.txt 已更新並重新部署。"
-        f"\n\n詳細：{e}"
-    )
-    st.stop()
+    import tensorflow as tf  # noqa
+    TF_AVAILABLE = True
+except ModuleNotFoundError:
+    TF_AVAILABLE = False
 
 
 # 基本設定
 CATEGORY_EN = ["crested_myna", "javan_myna", "common_myna"]
 CATEGORY_ZH = ["土八哥", "白尾八哥", "家八哥"]
-DEFAULT_MODEL_PATH = "myna_resnet50v2.h5"
+DEFAULT_MODEL_PATH = "assets/myna_logreg.npz"
 IMAGE_SIZE = (224, 224)
 
 # 內建範例（含八哥與非八哥），使用本地檔避免外部連線問題
@@ -65,26 +61,46 @@ def load_image(image_file: Union[Path, str, io.BytesIO]) -> Image.Image:
 @st.cache_resource(show_spinner=False)
 def load_tf_model(model_path: str):
     """載入 TensorFlow 模型，並在 Streamlit 端做快取。"""
+    from tensorflow.keras.models import load_model
     return load_model(model_path)
 
 
-def preprocess(img: Image.Image) -> np.ndarray:
-    """調整尺寸、轉成張量、套用 ResNet50V2 前處理。"""
-    img_resized = img.resize(IMAGE_SIZE, Image.Resampling.LANCZOS)
-    arr = np.array(img_resized)
-    arr = arr[None, ...]  # (1, 224, 224, 3)
-    arr = preprocess_input(arr)
-    return arr
+@st.cache_resource(show_spinner=False)
+def load_logreg_model(model_path: str):
+    """載入輕量 logistic regression 模型 (numpy 儲存)。"""
+    data = np.load(model_path)
+    return {
+        "w": data["w"],
+        "b": data["b"],
+        "mean": data["mean"],
+        "std": data["std"],
+    }
 
 
-def predict(model, img: Image.Image, labels: List[str]) -> Tuple[str, float, List[float]]:
-    """跑推論，回傳 top-1 與全類別分數。"""
-    arr = preprocess(img)
-    preds = model.predict(arr).flatten().tolist()
-    if len(preds) != len(labels):
-        raise ValueError(f"模型輸出維度 ({len(preds)}) 與標籤數 ({len(labels)}) 不符")
-    top_idx = int(np.argmax(preds))
-    return labels[top_idx], float(preds[top_idx]), preds
+def preprocess_logreg(img: Image.Image, target_size=(64, 64)) -> np.ndarray:
+    """調整尺寸、轉為向量，提供給輕量化 softmax 模型。"""
+    img_resized = img.resize(target_size, Image.Resampling.LANCZOS)
+    arr = np.array(img_resized).astype(np.float32) / 255.0  # (H,W,3)
+    return arr.reshape(1, -1)  # (1, D)
+
+
+def predict_logreg(model_params: dict, img: Image.Image, labels: List[str]) -> Tuple[str, float, List[float]]:
+    """使用預先訓練好的 logistic regression (numpy) 進行推論。"""
+    w = model_params["w"]
+    b = model_params["b"]
+    mean = model_params["mean"]
+    std = model_params["std"]
+
+    x = preprocess_logreg(img)
+    x = (x - mean) / (std + 1e-6)
+    logits = x @ w + b
+    logits = logits - logits.max(axis=1, keepdims=True)
+    exp = np.exp(logits)
+    probs = (exp / exp.sum(axis=1, keepdims=True)).flatten()
+    if len(probs) != len(labels):
+        raise ValueError(f"模型輸出維度 ({len(probs)}) 與標籤數 ({len(labels)}) 不符")
+    top_idx = int(np.argmax(probs))
+    return labels[top_idx], float(probs[top_idx]), probs.tolist()
 
 
 def discover_sample_images(base_dir: Path, categories: List[str]) -> List[Path]:
@@ -103,10 +119,8 @@ def discover_sample_images(base_dir: Path, categories: List[str]) -> List[Path]:
 
 def main():
     st.set_page_config(page_title="八哥辨識器", page_icon="🐦", layout="wide")
-    st.title("八哥辨識器 (ResNet50V2 遷移學習)")
-    st.markdown(
-        "上傳或選擇範例圖片，載入已訓練好的模型（預設 `myna_resnet50v2.h5`）後進行辨識。"
-    )
+    st.title("八哥辨識器 (輕量版, logistic regression)")
+    st.markdown("上傳或選擇範例圖片，使用內建輕量模型辨識三類八哥。")
 
     # Sidebar: 模型與輸入
     st.sidebar.header("設定")
@@ -155,15 +169,15 @@ def main():
             st.info("請上傳圖片或選擇範例。")
 
     # 載入模型
-    model = None
+    model_logreg = None
     model_error = None
-    if load_model_btn:
+    if load_model_btn or Path(model_path).exists():
         if not model_path or not Path(model_path).exists():
             model_error = f"找不到模型檔案：{model_path}"
         else:
             try:
                 with st.spinner("載入模型中..."):
-                    model = load_tf_model(model_path)
+                    model_logreg = load_logreg_model(model_path)
             except Exception as e:
                 model_error = f"模型載入失敗：{e}"
 
@@ -173,10 +187,10 @@ def main():
     # 推論
     with col2:
         st.subheader("推論結果")
-        if image is not None and model is not None:
+        if image is not None and model_logreg is not None:
             if st.button("開始辨識", type="primary"):
                 try:
-                    top_label, top_score, scores = predict(model, image, CATEGORY_ZH)
+                    top_label, top_score, scores = predict_logreg(model_logreg, image, CATEGORY_ZH)
                     st.success(f"Top-1: {top_label} ({top_score:.2%})")
                     chart_data = {
                         "label": CATEGORY_ZH,
@@ -187,7 +201,7 @@ def main():
                     st.error(f"推論失敗：{e}")
         elif image is None:
             st.info("尚未選擇圖片。")
-        elif model is None:
+        elif model_logreg is None:
             st.info("請先載入模型。")
 
     # 範例圖片提示
