@@ -126,6 +126,7 @@ def main():
     st.sidebar.header("設定")
     model_path = st.sidebar.text_input("模型路徑", value=DEFAULT_MODEL_PATH)
     load_model_btn = st.sidebar.button("載入模型")
+    threshold = st.sidebar.slider("非八哥判定門檻 (max prob)", 0.2, 0.9, 0.7, 0.05)
 
     uploaded = st.sidebar.file_uploader("上傳圖片", type=["jpg", "jpeg", "png", "bmp", "webp"])
 
@@ -191,7 +192,10 @@ def main():
             if st.button("開始辨識", type="primary"):
                 try:
                     top_label, top_score, scores = predict_logreg(model_logreg, image, CATEGORY_ZH)
-                    st.success(f"Top-1: {top_label} ({top_score:.2%})")
+                    if top_score < threshold:
+                        st.warning(f"判定：非八哥 (最高機率 {top_score:.2%} < 門檻 {threshold:.2f})")
+                    else:
+                        st.success(f"Top-1: {top_label} ({top_score:.2%})")
                     chart_data = {
                         "label": CATEGORY_ZH,
                         "probability": scores,
