@@ -1,0 +1,155 @@
+import os
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import numpy as np
+import streamlit as st
+from PIL import Image
+from tensorflow.keras.applications.resnet_v2 import preprocess_input
+from tensorflow.keras.models import load_model
+
+
+# 基本設定
+CATEGORY_EN = ["crested_myna", "javan_myna", "common_myna"]
+CATEGORY_ZH = ["土八哥", "白尾八哥", "家八哥"]
+DEFAULT_MODEL_PATH = "myna_resnet50v2.h5"
+IMAGE_SIZE = (224, 224)
+
+
+def load_image(image_file: Path) -> Image.Image:
+    """讀入影像並轉成 RGB。"""
+    img = Image.open(image_file)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    return img
+
+
+@st.cache_resource(show_spinner=False)
+def load_tf_model(model_path: str):
+    """載入 TensorFlow 模型，並在 Streamlit 端做快取。"""
+    return load_model(model_path)
+
+
+def preprocess(img: Image.Image) -> np.ndarray:
+    """調整尺寸、轉成張量、套用 ResNet50V2 前處理。"""
+    img_resized = img.resize(IMAGE_SIZE, Image.Resampling.LANCZOS)
+    arr = np.array(img_resized)
+    arr = arr[None, ...]  # (1, 224, 224, 3)
+    arr = preprocess_input(arr)
+    return arr
+
+
+def predict(model, img: Image.Image, labels: List[str]) -> Tuple[str, float, List[float]]:
+    """跑推論，回傳 top-1 與全類別分數。"""
+    arr = preprocess(img)
+    preds = model.predict(arr).flatten().tolist()
+    if len(preds) != len(labels):
+        raise ValueError(f"模型輸出維度 ({len(preds)}) 與標籤數 ({len(labels)}) 不符")
+    top_idx = int(np.argmax(preds))
+    return labels[top_idx], float(preds[top_idx]), preds
+
+
+def discover_sample_images(base_dir: Path, categories: List[str]) -> List[Path]:
+    """嘗試尋找範例圖片；若資料夾不存在則回傳空清單。"""
+    samples: List[Path] = []
+    for cat in categories:
+        cat_dir = base_dir / cat
+        if not cat_dir.exists():
+            continue
+        for fname in os.listdir(cat_dir):
+            path = cat_dir / fname
+            if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}:
+                samples.append(path)
+    return samples
+
+
+def main():
+    st.set_page_config(page_title="八哥辨識器", page_icon="🐦", layout="wide")
+    st.title("八哥辨識器 (ResNet50V2 遷移學習)")
+    st.markdown(
+        "上傳或選擇範例圖片，載入已訓練好的模型（預設 `myna_resnet50v2.h5`）後進行辨識。"
+    )
+
+    # Sidebar: 模型與輸入
+    st.sidebar.header("設定")
+    model_path = st.sidebar.text_input("模型路徑", value=DEFAULT_MODEL_PATH)
+    load_model_btn = st.sidebar.button("載入模型")
+
+    uploaded = st.sidebar.file_uploader("上傳圖片", type=["jpg", "jpeg", "png", "bmp", "webp"])
+
+    sample_images = discover_sample_images(Path("."), CATEGORY_EN)
+    sample_choice: Optional[str] = None
+    if sample_images:
+        sample_choice = st.sidebar.selectbox(
+            "或選擇範例圖片", options=["(不使用範例)"] + [str(p) for p in sample_images]
+        )
+
+    # 主體區
+    col1, col2 = st.columns([1, 1])
+    image: Optional[Image.Image] = None
+    image_name: Optional[str] = None
+
+    # 讀取圖片
+    if uploaded is not None:
+        try:
+            image = load_image(uploaded)
+            image_name = uploaded.name
+        except Exception as e:
+            st.error(f"讀取上傳圖片失敗：{e}")
+    elif sample_choice and sample_choice != "(不使用範例)":
+        try:
+            image = load_image(Path(sample_choice))
+            image_name = Path(sample_choice).name
+        except Exception as e:
+            st.error(f"讀取範例圖片失敗：{e}")
+
+    with col1:
+        st.subheader("輸入圖片")
+        if image is not None:
+            st.image(image, caption=image_name or "輸入圖片", use_column_width=True)
+        else:
+            st.info("請上傳圖片或選擇範例。")
+
+    # 載入模型
+    model = None
+    model_error = None
+    if load_model_btn:
+        if not model_path or not Path(model_path).exists():
+            model_error = f"找不到模型檔案：{model_path}"
+        else:
+            try:
+                with st.spinner("載入模型中..."):
+                    model = load_tf_model(model_path)
+            except Exception as e:
+                model_error = f"模型載入失敗：{e}"
+
+    if model_error:
+        st.error(model_error)
+
+    # 推論
+    with col2:
+        st.subheader("推論結果")
+        if image is not None and model is not None:
+            if st.button("開始辨識", type="primary"):
+                try:
+                    top_label, top_score, scores = predict(model, image, CATEGORY_ZH)
+                    st.success(f"Top-1: {top_label} ({top_score:.2%})")
+                    chart_data = {
+                        "label": CATEGORY_ZH,
+                        "probability": scores,
+                    }
+                    st.bar_chart(chart_data, x="label", y="probability", use_container_width=True)
+                except Exception as e:
+                    st.error(f"推論失敗：{e}")
+        elif image is None:
+            st.info("尚未選擇圖片。")
+        elif model is None:
+            st.info("請先載入模型。")
+
+    # 範例圖片提示
+    if not sample_images:
+        st.caption("未找到範例圖片資料夾，請自行上傳圖片進行辨識。")
+
+
+if __name__ == "__main__":
+    main()
