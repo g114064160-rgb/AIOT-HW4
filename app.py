@@ -5,8 +5,18 @@ from typing import List, Optional, Tuple
 import numpy as np
 import streamlit as st
 from PIL import Image
-from tensorflow.keras.applications.resnet_v2 import preprocess_input
-from tensorflow.keras.models import load_model
+
+# TensorFlow 依賴：若缺少會在 UI 顯示清楚錯誤
+try:
+    from tensorflow.keras.applications.resnet_v2 import preprocess_input
+    from tensorflow.keras.models import load_model
+except ModuleNotFoundError as e:
+    st.error(
+        "TensorFlow 未安裝或版本不符，請先安裝 `tensorflow` 或 `tensorflow-cpu`。"
+        " 若在 Streamlit Cloud，請確認 requirements.txt 已更新並重新部署。"
+        f"\n\n詳細：{e}"
+    )
+    st.stop()
 
 
 # 基本設定
