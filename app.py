@@ -42,7 +42,14 @@ def load_image(image_file: Union[Path, str, io.BytesIO]) -> Image.Image:
     if isinstance(image_file, (str, Path)):
         s = str(image_file)
         if s.startswith("http://") or s.startswith("https://"):
-            resp = requests.get(s, timeout=10)
+            resp = requests.get(
+                s,
+                timeout=15,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; StreamlitApp/1.0)",
+                    "Accept": "image/*,*/*;q=0.8",
+                },
+            )
             resp.raise_for_status()
             buf = io.BytesIO(resp.content)
             img = Image.open(buf)
